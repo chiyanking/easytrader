@@ -2,11 +2,10 @@
 import logging
 import sys
 
-import six
-
 from easytrader.joinquant_follower import JoinQuantFollower
 from easytrader.log import logger
 from easytrader.ricequant_follower import RiceQuantFollower
+from easytrader.utils.perf import perf_log
 from easytrader.xq_follower import XueQiuFollower
 from easytrader.xqtrader import XueQiuTrader
 
@@ -14,6 +13,7 @@ if sys.version_info <= (3, 5):
     raise TypeError("不支持 Python3.5 及以下版本，请升级")
 
 
+@perf_log
 def use(broker, debug=False, **kwargs):
     """用于生成特定的券商对象
     :param broker:券商名支持 ['yh_client', '银河客户端'] ['ht_client', '华泰客户端']

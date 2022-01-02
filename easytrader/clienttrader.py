@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 import abc
 import functools
-import logging
 import os
 import re
 import sys
 import time
 from typing import Type, Union
-
-import hashlib, binascii
 
 import easyutils
 from pywinauto import findwindows, timings
@@ -18,8 +15,9 @@ from easytrader.config import client
 from easytrader.grid_strategies import IGridStrategy
 from easytrader.log import logger
 from easytrader.refresh_strategies import IRefreshStrategy
+from easytrader.utils.captcha import captcha_recognize
 from easytrader.utils.misc import file2dict
-from easytrader.utils.perf import perf_clock
+from easytrader.utils.perf import perf_log
 
 if not sys.platform.startswith("darwin"):
     import pywinauto
@@ -166,7 +164,7 @@ class ClientTrader(IClientTrader):
 
         return self._get_grid_data(self._config.COMMON_GRID_CONTROL_ID)
 
-    @perf_clock
+
     def cancel_entrust(self, entrust_no):
         self.refresh()
         for i, entrust in enumerate(self.cancel_entrusts):
@@ -180,9 +178,13 @@ class ClientTrader(IClientTrader):
         self._switch_left_menus(["撤单[F3]"])
 
         # 点击全部撤销控件
-        self._app.top_window().child_window(
+        cancel_all_button = self._app.top_window().child_window(
             control_id=self._config.TRADE_CANCEL_ALL_ENTRUST_CONTROL_ID, class_name="Button", title_re="""全撤.*"""
-        ).click()
+        )
+        # 不可以点击状态
+        if not cancel_all_button.is_enabled():
+            return
+        cancel_all_button.click()
         self.wait(0.2)
 
         # 等待出现 确认兑换框
@@ -198,31 +200,31 @@ class ClientTrader(IClientTrader):
         # 如果出现了确认窗口
         self.close_pop_dialog()
 
-    @perf_clock
+    
     def repo(self, security, price, amount, **kwargs):
         self._switch_left_menus(["债券回购", "融资回购（正回购）"])
 
         return self.trade(security, price, amount)
 
-    @perf_clock
+
     def reverse_repo(self, security, price, amount, **kwargs):
         self._switch_left_menus(["债券回购", "融劵回购（逆回购）"])
 
         return self.trade(security, price, amount)
 
-    @perf_clock
+
     def buy(self, security, price, amount, **kwargs):
         self._switch_left_menus(["买入[F1]"])
 
         return self.trade(security, price, amount)
 
-    @perf_clock
+    
     def sell(self, security, price, amount, **kwargs):
         self._switch_left_menus(["卖出[F2]"])
 
         return self.trade(security, price, amount)
 
-    @perf_clock
+    
     def market_buy(self, security, amount, ttype=None, limit_price=None, **kwargs):
         """
         市价买入
@@ -239,7 +241,7 @@ class ClientTrader(IClientTrader):
 
         return self.market_trade(security, amount, ttype, limit_price=limit_price)
 
-    @perf_clock
+
     def market_sell(self, security, amount, ttype=None, limit_price=None, **kwargs):
         """
         市价卖出
@@ -357,13 +359,15 @@ class ClientTrader(IClientTrader):
             class_name="CVirtualGridCtrl",
         ).click(coords=(x, y))
 
-    @perf_clock
+    
     def is_exist_pop_dialog(self):
         self.wait(0.5)  # wait dialog display
         try:
-            return (
-                self._main.wrapper_object() != self._app.top_window().wrapper_object()
-            )
+            if self._main.wrapper_object() != self._app.top_window().wrapper_object():
+                if self.app.top_window().window(control_id=0x965, class_name='Static').exists():
+                    self.close_pop_recognize()
+                else:
+                    return True
         except (
             findwindows.ElementNotFoundError,
             timings.TimeoutError,
@@ -372,7 +376,7 @@ class ClientTrader(IClientTrader):
             logger.exception("check pop dialog timeout")
             return False
 
-    @perf_clock
+
     def close_pop_dialog(self):
         try:
             if self._main.wrapper_object() != self._app.top_window().wrapper_object():
@@ -387,6 +391,31 @@ class ClientTrader(IClientTrader):
         ) as ex:
             pass
 
+    def close_pop_recognize(self):
+        try:
+            img_win = self.app.top_window().window(control_id=0x965, class_name='Static')
+            if img_win.exists():
+                file_path = "tmp.png"
+                while True:
+                    img_win.click()
+                    self.wait(0.1)
+                    img_win = self.app.top_window().window(control_id=0x965, class_name='Static')
+                    img_win.capture_as_image().save(file_path)
+                    captcha_num = captcha_recognize(file_path).strip()  # 识别验证码
+                    if len(captcha_num) == 4:
+                        break
+                captcha_num = "".join(captcha_num.split())
+                logger.info("captcha result-->" + captcha_num)
+                self.app.top_window().Edit1.set_edit_text("")
+                self.app.top_window().Edit1.type_keys(captcha_num)  # 模拟输入验证码
+                self.app.top_window().Button1.click()
+        except (
+                findwindows.ElementNotFoundError,
+                timings.TimeoutError,
+                RuntimeError,
+        ) as ex:
+            logger.error("识别验证码失败")
+            pass
     def _run_exe_path(self, exe_path):
         return os.path.join(os.path.dirname(exe_path), "xiadan.exe")
 
@@ -397,14 +426,14 @@ class ClientTrader(IClientTrader):
         self._app.kill()
 
     def _close_prompt_windows(self):
-        self.wait(1)
+        self.wait(0.2)
         for window in self._app.windows(class_name="#32770", visible_only=True):
             title = window.window_text()
             if title != self._config.TITLE:
-                logging.info("close " + title)
+                logger.info("close " + title)
                 window.close()
                 self.wait(0.2)
-        self.wait(1)
+        self.wait(0.2)
 
     def close_pormpt_window_no_wait(self):
         for window in self._app.windows(class_name="#32770"):
@@ -425,20 +454,20 @@ class ClientTrader(IClientTrader):
             control_id=control_id, class_name="Button"
         ).click()
 
-    @perf_clock
+
     def _submit_trade(self):
         time.sleep(0.2)
         self._main.child_window(
             control_id=self._config.TRADE_SUBMIT_CONTROL_ID, class_name="Button"
         ).click()
 
-    @perf_clock
+
     def __get_top_window_pop_dialog(self):
         return self._app.top_window().window(
             control_id=self._config.POP_DIALOD_TITLE_CONTROL_ID
         )
 
-    @perf_clock
+
     def _get_pop_dialog_title(self):
         return (
             self._app.top_window()
@@ -516,7 +545,7 @@ class ClientTrader(IClientTrader):
         for item in items:
             item.collapse()
 
-    @perf_clock
+
     def _switch_left_menus(self, path, sleep=0.2):
         self.close_pop_dialog()
         self._get_left_menus_handle().get_item(path).select()
@@ -561,7 +590,7 @@ class ClientTrader(IClientTrader):
         self.refresh_strategy.set_trader(self)
         self.refresh_strategy.refresh()
 
-    @perf_clock
+
     def _handle_pop_dialogs(self, handler_class=pop_dialog_handler.PopDialogHandler):
         handler = handler_class(self._app)
 
@@ -583,6 +612,7 @@ class BaseLoginClientTrader(ClientTrader):
         """Login Client Trader"""
         pass
 
+    @perf_log
     def prepare(
         self,
         config_path=None,

@@ -4,7 +4,6 @@ import time
 from typing import Optional
 
 from easytrader import exceptions
-from easytrader.utils.perf import perf_clock
 from easytrader.utils.win_gui import SetForegroundWindow, ShowWindow, win32defines
 
 
@@ -19,7 +18,7 @@ class PopDialogHandler:
         else:
             SetForegroundWindow(window.wrapper_object())  # bring to front
 
-    @perf_clock
+    
     def handle(self, title):
         if any(s in title for s in {"提示信息", "委托确认", "网上交易用户协议", "撤单确认"}):
             self._submit_by_shortcut()
@@ -58,7 +57,7 @@ class PopDialogHandler:
 
 
 class TradePopDialogHandler(PopDialogHandler):
-    @perf_clock
+    
     def handle(self, title) -> Optional[dict]:
         if title == "委托确认":
             self._submit_by_shortcut()
@@ -86,7 +85,7 @@ class TradePopDialogHandler(PopDialogHandler):
 
         if title == "提示":
             content = self._extract_content()
-            if "成功" in content:
+            if "委托已提交" in content:
                 entrust_no = self._extract_entrust_id(content)
                 self._submit_by_click()
                 return {"entrust_no": entrust_no}

@@ -2,16 +2,14 @@
 import functools
 import logging
 import timeit
-
-from easytrader import logger
-
+from easytrader.log import logger
 try:
     from time import process_time
 except:
     from time import clock as process_time
 
 
-def perf_clock(f):
+def perf_log(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if not logger.isEnabledFor(logging.DEBUG):
